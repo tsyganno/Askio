@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Askio</title></head>
+<body>
+  <h1>Askio</h1>
+  <form id="qform">
+    <input id="q" name="q" style="width:60%" placeholder="Задайте вопрос"/>
+    <button type="submit">Спросить</button>
+  </form>
+  <div id="answer"></div>
+<script>
+document.getElementById('qform').onsubmit = async (e) => {
+  e.preventDefault();
+  const q = document.getElementById('q').value;
+  const res = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: q})});
+  const data = await res.json();
+  document.getElementById('answer').innerText = data.answer + "\\n\\nSources: " + JSON.stringify(data.sources);
+};
+</script>
+</body>
+</html>

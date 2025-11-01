@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent  # корень про�
 class Settings(BaseSettings):
     APP_HOST: str
     APP_PORT: int
+    DATABASE_URL: str
 
     class Config:
         env_file = BASE_DIR / ".env.example"  # имя файла с переменными окружения

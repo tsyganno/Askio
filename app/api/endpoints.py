@@ -1,10 +1,18 @@
-import time
-import uuid
+import asyncio
+import io
+import os
 
-from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse
+from PyPDF2 import PdfReader
+from fastapi import FastAPI, Request, UploadFile, File, HTTPException
+from fastapi.responses import HTMLResponse
+from typing import List
 
+from app.database.schema_models import AskResponse, AskRequest
+from app.core.logger import logger
+from app.services.rag import rag
+from app.services.other_functions import split_text_into_chunks
 from app.core.config import templates
+from app.database.crud import save_query, save_document
 
 
 app = FastAPI(title="Askio")
@@ -21,28 +29,87 @@ async def health():
 
 
 @app.post("/api/documents")
-async def upload_documents(files: list[UploadFile] = File(...)):
-    saved = []
-    for f in files:
-        txt = (await f.read()).decode(errors="ignore")
-        # разбиение на чанки + инжест в vectorstore
-        await rag.ingest_document(text=txt, doc_id=str(uuid.uuid4()), metadata={"filename": f.filename})
-        saved.append(f.filename)
-    return {"uploaded": saved}
+async def upload_documents(files: List[UploadFile] = File(...)):
+    """
+    Загрузка одного или нескольких документов (PDF/TXT/MD).
+    Каждый файл автоматически разбивается на чанки и добавляется в базу.
+    """
+    results = []
+
+    for file in files:
+        filename = file.filename
+        try:
+            logger.info(f"Загружается документ: {filename}")
+
+            # 1. Читаем файл
+            content = await file.read()
+            if not content:
+                raise ValueError("Файл пустой")
+
+            # 2. Определяем расширение и извлекаем текст
+            ext = os.path.splitext(filename)[1].lower()
+
+            if ext in [".txt", ".md"]:
+                text = content.decode("utf-8", errors="ignore")
+            elif ext == ".pdf":
+                pdf = PdfReader(io.BytesIO(content))
+                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Формат {ext} не поддерживается (только .txt, .md, .pdf)",
+                )
+
+            # 3. Разбиваем на чанки
+            chunks = split_text_into_chunks(text)
+            logger.info(f"{filename}: получено {len(chunks)} чанков")
+
+            # 4. Добавляем документ и чанки в БД
+            doc_id = await save_document(filename, chunks)
+            logger.info(f"{filename}: добавлен в базу (id={doc_id})")
+
+            results.append({
+                "filename": filename,
+                "status": "ok",
+                "document_id": doc_id,
+                "chunks": len(chunks),
+            })
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"Ошибка при обработке {filename}: {e}")
+            results.append({
+                "filename": filename,
+                "status": "error",
+                "detail": str(e),
+            })
+
+    # Возвращаем суммарный результат
+    return {"results": results}
 
 
-@app.post("/api/ask")
-async def ask(question: str):
-    # кеширование
-    cached = await cache.get(question)
-    if cached:
-        return JSONResponse({"answer": cached["answer"], "sources": cached["sources"], "cached": True})
-    start = time.time()
-    answer, sources, tokens = await rag.answer(question)
-    duration = time.time() - start
-    # сохранить в БД (async)
-    async with async_session() as s:
-        await s.run_sync(lambda sess: None)  # здесь вызов сохранения истории
-    # записать в кэш
-    await cache.set(question, {"answer": answer, "sources": sources}, ttl=None)
-    return {"answer": answer, "sources": sources, "tokens": tokens, "time": duration}
+@app.post("/api/ask", response_model=AskResponse)
+async def ask_endpoint(request: AskRequest):
+    try:
+        # Получаем ответ (с кэшированием внутри RAGService)
+        answer, used_chunks, tokens_used, duration = await rag.ask(
+            request.question,
+            request.top_k
+        )
+
+        # Асинхронно сохраняем в БД (не блокируем ответ)
+        asyncio.create_task(
+            save_query(request.question, answer, tokens_used, duration)
+        )
+
+        return AskResponse(
+            answer=answer,
+            chunks=len(used_chunks),
+            tokens=tokens_used,
+            latency_ms=duration
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка в ask endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

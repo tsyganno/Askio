@@ -14,7 +14,7 @@ document.getElementById('qform').onsubmit = async (e) => {
   const q = document.getElementById('q').value;
   const res = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: q})});
   const data = await res.json();
-  document.getElementById('answer').innerText = data.answer + "\\n\\nSources: " + JSON.stringify(data.sources);
+  document.getElementById('answer').innerText = data.answer;
 };
 </script>
 </body>

@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import List
 
 
 class AskRequest(BaseModel):
@@ -8,6 +9,6 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    chunks: int
     tokens: int
     latency_ms: float
+    sources: List[str]

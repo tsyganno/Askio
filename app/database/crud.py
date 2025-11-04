@@ -1,3 +1,6 @@
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+
 from app.database.session import async_session
 from app.database.models import QueryHistory, Document, DocumentChunk
 from app.core.config import created_at_irkutsk_tz
@@ -44,3 +47,18 @@ async def save_query(question: str, answer: str, tokens: int, latency_ms: float)
             logger.info(f"Запрос сохранен в БД: {question[:50]}...")
     except Exception as e:
         logger.error(f"Ошибка сохранения запроса в БД: {e}")
+
+
+async def get_sources_for_chunks(chunk_ids: list[int]) -> list[DocumentChunk]:
+    """
+    Получаем список названий документов, из которых взяты чанки.
+    Возвращаем уникальные названия.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.id.in_(chunk_ids))
+            .options(selectinload(DocumentChunk.document))
+        )
+        chunks = result.scalars().all()
+    return chunks

@@ -7,14 +7,27 @@
     <input id="q" name="q" style="width:60%" placeholder="Задайте вопрос"/>
     <button type="submit">Спросить</button>
   </form>
-  <div id="answer"></div>
+ <div id="answer"></div>
+<div id="sources"></div>
 <script>
 document.getElementById('qform').onsubmit = async (e) => {
   e.preventDefault();
   const q = document.getElementById('q').value;
-  const res = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question: q})});
+  const res = await fetch('/api/ask', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({question: q})
+  });
   const data = await res.json();
+
   document.getElementById('answer').innerText = data.answer;
+
+  if (data.sources && data.sources.length > 0) {
+    document.getElementById('sources').innerHTML = "<h3>Источники:</h3>" +
+      "<ul>" + data.sources.map(s => `<li>${s}</li>`).join("") + "</ul>";
+  } else {
+    document.getElementById('sources').innerHTML = "";
+  }
 };
 </script>
 </body>

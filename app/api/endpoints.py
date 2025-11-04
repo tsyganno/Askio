@@ -10,6 +10,7 @@ from typing import List
 from app.database.schema_models import AskResponse, AskRequest
 from app.core.logger import logger
 from app.services.rag import rag
+from app.services.cache import cache
 from app.services.other_functions import split_text_into_chunks
 from app.core.config import templates
 from app.database.crud import save_query, save_document
@@ -21,6 +22,7 @@ app = FastAPI(title="Askio")
 @app.on_event("startup")
 async def startup_event():
     await rag.index_chunks()
+    await cache.init_redis()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -99,7 +101,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 async def ask_endpoint(request: AskRequest):
     try:
         # Получаем ответ (с кэшированием внутри RAGService)
-        answer, used_chunks, tokens_used, duration = await rag.ask(
+        answer, tokens_used, duration, sources = await rag.ask(
             request.question,
             request.top_k
         )
@@ -111,9 +113,9 @@ async def ask_endpoint(request: AskRequest):
 
         return AskResponse(
             answer=answer,
-            chunks=len(used_chunks),
             tokens=tokens_used,
-            latency_ms=duration
+            latency_ms=duration,
+            sources=sources
         )
 
     except Exception as e:

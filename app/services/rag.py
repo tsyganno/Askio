@@ -1,9 +1,9 @@
 import time
-
+import chromadb
+from chromadb.utils import embedding_functions
 from llama_cpp import Llama
-from sqlalchemy.future import select
 from typing import List, Tuple
-
+from sqlalchemy.future import select
 
 from app.database.models import DocumentChunk
 from app.core.config import BASE_DIR, settings
@@ -14,46 +14,58 @@ from app.core.logger import logger
 
 class RAGService:
     def __init__(self):
-        # Путь к скачанной GGUF модели
+        # ---- LLaMA модель ----
         model_path = BASE_DIR / settings.MODEL_PATH
-
         if not model_path.exists():
-            raise FileNotFoundError(f"Модель не найдена по пути: {model_path}")
+            raise FileNotFoundError(f"Модель не найдена: {model_path}")
 
-        logger.info(f"Загружаем модель: {model_path}")
+        logger.info(f"Загружаем модель LLaMA: {model_path}")
 
-        # Инициализация модели
         self.llm = Llama(
             model_path=str(model_path),
-            n_ctx=2048,  # Размер контекста
-            n_threads=4,  # Количество потоков
-            verbose=False  # Отключить лишние логи
+            n_ctx=2048,
+            n_threads=4,
+            verbose=False
         )
 
-        logger.info("Модель успешно загружена")
+        # ---- ChromaDB ----
+        self.chroma_client = chromadb.PersistentClient(path=str(BASE_DIR / "app/data/chroma"))
+        self.collection = self.chroma_client.get_or_create_collection("document_chunks")
 
-    async def get_all_chunks(self) -> List[DocumentChunk]:
+        # ---- Встроенный эмбеддер (SentenceTransformer от Chroma) ----
+        self.embedder = embedding_functions.DefaultEmbeddingFunction()
+
+        logger.info("RAGService инициализирован (LLaMA + ChromaDB)")
+
+    async def index_chunks(self):
+        """
+        Загружает все чанки из БД в Chroma (например, при первом запуске).
+        """
         async with async_session() as session:
             result = await session.execute(select(DocumentChunk))
-            return result.scalars().all()
+            chunks = result.scalars().all()
 
-    def _count_tokens(self, text: str) -> int:
-        """Подсчет токенов в тексте (упрощенный)"""
-        # Для точного подсчета нужно использовать токенайзер модели
-        # Это упрощенная версия - примерно 1 токен = 4 символа
-        return len(text) // 4
+        if not chunks:
+            logger.warning("Нет чанков для индексации.")
+            return
+
+        logger.info(f"Добавляем {len(chunks)} чанков в Chroma...")
+
+        ids = [str(c.id) for c in chunks]
+        texts = [c.text for c in chunks]
+        metadatas = [{"document_id": c.document_id, "chunk_index": c.chunk_index} for c in chunks]
+
+        self.collection.add(ids=ids, documents=texts, metadatas=metadatas)
+        logger.info("Индексация завершена")
 
     async def ask(self, question: str, top_k: int = 5) -> Tuple[str, List[DocumentChunk], int, float]:
         start_time = time.time()
 
-        # Проверяем кэш
+        # ---- Проверка кэша ----
         cached_data = await cache.get_cached_answer(question, top_k)
         if cached_data:
-            # Восстанавливаем объекты чанков из данных
             from app.database.models import DocumentChunk
-            chunks = [DocumentChunk(**chunk_data) for chunk_data in cached_data.get("chunks", [])]
-
-            # ВОЗВРАЩАЕМ ДАННЫЕ ИЗ КЭША (включая вопрос)
+            chunks = [DocumentChunk(**c) for c in cached_data.get("chunks", [])]
             return (
                 cached_data["answer"],
                 chunks,
@@ -61,41 +73,30 @@ class RAGService:
                 cached_data["duration"]
             )
 
-        chunks = await self.get_all_chunks()
-        if not chunks:
-            return "В базе нет документов.", [], 0, 0
+        # ---- Поиск релевантных чанков в Chroma ----
+        query_result = self.collection.query(query_texts=[question], n_results=top_k)
+        retrieved_docs = query_result["documents"][0] if query_result["documents"] else []
 
-        # Поиск релевантных чанков
-        question_words = set(question.lower().split())
-        scored_chunks = []
-        for chunk in chunks:
-            chunk_words = set(chunk.text.lower().split())
-            score = len(question_words & chunk_words)
-            if score > 0:
-                scored_chunks.append((score, chunk))
+        if not retrieved_docs:
+            return "В базе нет релевантных документов.", [], 0, 0
 
-        # Сортировка и выбор топ-k
-        scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        relevant_chunks = [c for _, c in scored_chunks[:top_k]]
+        # ---- Формируем контекст ----
+        context_text = "\n".join(retrieved_docs)
 
-        context_text = "\n".join([c.text for c in relevant_chunks]) or "Нет релевантных документов."
-
-        # Формируем промпт для LLaMA 3.2
-        prompt = f"""<|start_header_id|>system<|end_header_id|>
-
-        Ты - полезный AI ассистент. Ответь на вопрос пользователя используя предоставленный контекст.
-        Если в контексте нет информации для ответа, скажи об этом.
+        prompt = f"""
+        Ты — полезный ассистент. Используй контекст ниже, чтобы ответить на вопрос.
+        Если информации недостаточно, скажи об этом.
         
-        Контекст: {context_text}<|eot_id|>
-        <|start_header_id|>user<|end_header_id|>
+        Контекст:
+        {context_text}
         
-        {question}<|eot_id|>
-        <|start_header_id|>assistant<|end_header_id|>
+        Вопрос:
+        {question}
         
+        Ответ:
         """
 
-        # Генерация ответа
-        generation_start = time.time()
+        # ---- Генерация ответа ----
         try:
             output = self.llm(
                 prompt,
@@ -105,30 +106,28 @@ class RAGService:
                 stop=["<|eot_id|>", "<|end_of_text|>"],
                 echo=False
             )
-
             answer = output['choices'][0]['text'].strip()
-            tokens_used = output['usage']['total_tokens'] if 'usage' in output else self._count_tokens(answer)
+            tokens_used = output.get('usage', {}).get('total_tokens', len(answer) // 4)
 
         except Exception as e:
             logger.error(f"Ошибка генерации: {e}")
-            answer = "Извините, произошла ошибка при генерации ответа."
+            answer = "Произошла ошибка при генерации ответа."
             tokens_used = 0
 
         duration = time.time() - start_time
-        generation_duration = time.time() - generation_start
 
-        # Сохраняем в кэш (ВКЛЮЧАЯ ВОПРОС)
+        # ---- Кэширование ----
         cache_data = {
             "answer": answer,
-            "chunks": [{"id": c.id, "text": c.text} for c in relevant_chunks],
+            "chunks": [{"text": t} for t in retrieved_docs],
             "tokens": tokens_used,
-            "duration": generation_duration
-            # Вопрос сохраняется автоматически в redis_service.set_cached_answer
+            "duration": duration
         }
         await cache.set_cached_answer(question, top_k, cache_data)
 
-        return answer, relevant_chunks, tokens_used, duration
+        return answer, [], tokens_used, duration
 
 
-# Глобальный объект RAG
+# Глобальный экземпляр
 rag = RAGService()
+

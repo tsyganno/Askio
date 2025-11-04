@@ -18,6 +18,11 @@ from app.database.crud import save_query, save_document
 app = FastAPI(title="Askio")
 
 
+@app.on_event("startup")
+async def startup_event():
+    await rag.index_chunks()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
@@ -66,6 +71,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
 
             # 4. Добавляем документ и чанки в БД
             doc_id = await save_document(filename, chunks)
+
             logger.info(f"{filename}: добавлен в базу (id={doc_id})")
 
             results.append({

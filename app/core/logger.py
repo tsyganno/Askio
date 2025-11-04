@@ -38,4 +38,3 @@ logger.addHandler(file_handler)
 # Тест
 logger.info("Логирование успешно настроено!")
 logger.info("Сервис работает!")
-

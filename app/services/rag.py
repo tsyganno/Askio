@@ -1,6 +1,5 @@
 import time
 import chromadb
-import re
 
 from chromadb.utils import embedding_functions
 from llama_cpp import Llama

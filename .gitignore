@@ -135,3 +135,9 @@ dmypy.json
 # GGUF model files
 *.gguf
 llama/*.gguf
+
+# JetBrains IDE
+.idea/
+*.iws
+*.iml
+*.ipr

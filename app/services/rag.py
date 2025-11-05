@@ -93,16 +93,21 @@ class RAGService:
         relevance_scores = []
         for cid, text in zip(chunk_ids, retrieved_docs):
             prompt = f"""
-    Оцени, насколько следующий текст отвечает на вопрос.
-    Возьми текст и вопрос, и выдай число от 0 до 1, где 1 — текст максимально релевантен.
+            Оцени, насколько следующий текст отвечает на вопрос.
+            Возьми текст и вопрос, и выдай число от 0 до 1, где:
+            
+            1.0 - текст полностью отвечает на вопрос
+            0.8 - текст частично отвечает, содержит полезную информацию
+            0.5 - текст косвенно связан с вопросом
+            0.0 - текст не связан с вопросом
 
-    Вопрос:
-    {question}
-
-    Текст:
-    {text}
-
-    Оценка релевантности:"""
+            Вопрос:
+            {question}
+        
+            Текст:
+            {text}
+        
+            Оценка релевантности:"""
 
             try:
                 output = self.llm(
@@ -123,6 +128,7 @@ class RAGService:
 
         # ---- 4. Берём top N наиболее релевантных ----
         relevance_scores.sort(key=lambda x: x[1], reverse=True)
+        # с min_score можно поиграться и настроить, чтобы получать максимально правдивые источники
         min_score = 0.7
         top_chunks = [(cid, score, text) for cid, score, text in relevance_scores if score >= min_score]
 
@@ -131,7 +137,17 @@ class RAGService:
 
         filtered_texts = [text for cid, score, text in top_chunks]
         used_chunk_ids = [cid for cid, score, text in top_chunks]
-        sources = list({chunk_map[cid].document.filename for cid in used_chunk_ids})
+
+        logger.info(f"used_chunk_ids={used_chunk_ids}")
+        logger.info(f"chunk_map keys={list(chunk_map.keys())}")
+        missing = [cid for cid in used_chunk_ids if cid not in chunk_map]
+        if missing:
+            logger.warning(f"⚠️ Пропущены chunk_id: {missing}")
+        sources = list({
+            chunk_map[cid].document.filename
+            for cid in used_chunk_ids
+            if cid in chunk_map
+        })
 
         # ---- 5. Формируем контекст ----
         context_text = "\n".join(filtered_texts)
@@ -158,7 +174,8 @@ class RAGService:
                 stop=["<|eot_id|>", "<|end_of_text|>"],
                 echo=False
             )
-            answer = output['choices'][0]['text'].strip()
+            filthy_answer = output['choices'][0]['text'].strip()
+            answer = filthy_answer[:filthy_answer.rfind('.') + 1]
             tokens_used = output.get('usage', {}).get('total_tokens', len(answer) // 4)
         except Exception as e:
             logger.error(f"Ошибка генерации: {e}")

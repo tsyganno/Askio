@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import traceback
 
 from PyPDF2 import PdfReader
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
@@ -9,6 +10,7 @@ from typing import List
 
 from app.database.schema_models import AskResponse, AskRequest
 from app.core.logger import logger
+from app.database.session import init_db
 from app.services.rag import rag
 from app.services.cache import cache
 from app.services.other_functions import split_text_into_chunks
@@ -21,8 +23,11 @@ app = FastAPI(title="Askio")
 
 @app.on_event("startup")
 async def startup_event():
+    await init_db()
+    logger.info("БД подключена")
     await rag.index_chunks()
     await cache.init_redis()
+    logger.info("redis запущен")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -119,5 +124,7 @@ async def ask_endpoint(request: AskRequest):
         )
 
     except Exception as e:
-        logger.error(f"Ошибка в ask endpoint: {e}")
+        logger.error(f"Ошибка в ask endpoint: {str(e)}")
+        logger.error(f"Тип ошибки: {type(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Internal server error")

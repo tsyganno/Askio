@@ -103,7 +103,6 @@ celerybeat.pid
 
 # Environments
 .env
-.env.example
 .venv
 uploads/
 data/*.pbf

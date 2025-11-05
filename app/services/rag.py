@@ -30,13 +30,34 @@ class RAGService:
             verbose=False
         )
 
-        # ---- ChromaDB ----
-        self.chroma_client = chromadb.PersistentClient(path=str(BASE_DIR / "app/data/chroma"))
-        self.collection = self.chroma_client.get_or_create_collection("document_chunks")
+        # Ждем пока ChromaDB запустится
+        max_retries = 30
+        for i in range(max_retries):
+            try:
+                self.chroma_client = chromadb.HttpClient(host="chroma", port=8000)
+                # Проверяем подключение
+                self.chroma_client.heartbeat()
+                logger.info("✅ Подключение к ChromaDB установлено")
+                break
+            except Exception as e:
+                if i < max_retries - 1:
+                    logger.warning(f"⏳ ChromaDB не готов, ждем... ({i + 1}/{max_retries})")
+                    time.sleep(2)
+                else:
+                    logger.error(f"❌ Не удалось подключиться к ChromaDB: {e}")
+                    raise
+
+        # # ---- ChromaDB ----
+        # self.chroma_client = chromadb.HttpClient(host="chroma", port=8000)
 
         # ---- Встроенный эмбеддер (SentenceTransformer от Chroma) ----
-        self.embedder = embedding_functions.DefaultEmbeddingFunction()
-
+        self.embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+        self.collection = self.chroma_client.get_or_create_collection(
+            name="document_chunks",
+            embedding_function=self.embedder
+        )
         logger.info("RAGService инициализирован (LLaMA + ChromaDB)")
 
     async def index_chunks(self):
@@ -46,16 +67,20 @@ class RAGService:
         async with async_session() as session:
             result = await session.execute(select(DocumentChunk))
             chunks = result.scalars().all()
+        logger.info(f"Найдено {len(chunks)} чанков в БД для индексации")
 
         if not chunks:
             logger.warning("Нет чанков для индексации.")
             return
 
-        logger.info(f"Добавляем {len(chunks)} чанков в Chroma...")
+        # ДИАГНОСТИКА: посмотрим на первые 3 чанка
+        for i, chunk in enumerate(chunks[:3]):
+            logger.info(f"Чанк {i}: ID={chunk.id}, Документ={chunk.document_id}, Текст={chunk.text[:100]}...")
 
         ids = [str(c.id) for c in chunks]
         texts = [c.text for c in chunks]
         metadatas = [{"document_id": c.document_id, "chunk_index": c.chunk_index} for c in chunks]
+        logger.info(f"Добавляем {len(ids)} чанков в Chroma...")
 
         self.collection.add(ids=ids, documents=texts, metadatas=metadatas)
         logger.info("Индексация завершена")
@@ -78,9 +103,15 @@ class RAGService:
             )
 
         # ---- 1. Поиск топ чанков в Chroma ----
+        logger.info(f"Ищем в Chroma: '{question}'")
         query_result = self.collection.query(query_texts=[question], n_results=top_k)
         retrieved_docs = query_result["documents"][0] if query_result["documents"] else []
         chunk_ids = [int(cid) for cid in query_result['ids'][0]]
+        logger.info(f"Chroma вернул: {len(retrieved_docs)} документов, IDs: {chunk_ids}")
+
+        # ДИАГНОСТИКА: что именно вернул Chroma
+        for i, (doc, cid) in enumerate(zip(retrieved_docs, chunk_ids)):
+            logger.info(f"Документ {i}: ID={cid}, Текст={doc[:100]}...")
 
         if not retrieved_docs:
             return "В базе нет релевантных документов.", 0, 0, []

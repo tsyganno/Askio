@@ -179,69 +179,6 @@ pytest -v
 
 ***
 
-## 🧱 Структура Docker Compose
-
-```yaml
-version: "3.9"
-
-services:
-  api:
-    build: .
-    container_name: askio_api
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env  # ← загрузить все переменные из .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://us:test@db:5432/askio  # переопределить для Docker
-      - REDIS_URL=redis://redis:6379/0
-      - OLLAMA_HOST=http://ollama:11434
-    volumes:
-      - .:/app
-      - ./llama:/app/models
-    depends_on:
-      - db
-      - redis
-      - ollama
-
-  db:
-    image: postgres:15
-    container_name: askio_db
-    restart: always
-    environment:
-      POSTGRES_USER: us
-      POSTGRES_PASSWORD: test
-      POSTGRES_DB: askio
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    container_name: askio_redis
-    restart: always
-    ports:
-      - "6379:6379"
-
-  ollama:
-    image: ollama/ollama
-    container_name: askio_ollama
-    restart: always
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    entrypoint: >
-      sh -c "ollama serve & sleep 5 && ollama pull llama3.1 && tail -f /dev/null"
-
-volumes:
-  postgres_data:
-  ollama_data:
-```
-
-***
-
 ## 📊 Преимущества реализации
 
 * ⚡ Полностью асинхронный стек (FastAPI + async SQLAlchemy)

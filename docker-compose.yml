@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   api:
     build: .
@@ -7,18 +5,33 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env  # ← загрузить все переменные из .env
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://us:test@db:5432/askio  # переопределить для Docker
+      - DATABASE_URL=postgresql+asyncpg://us:test@db:5432/askio
       - REDIS_URL=redis://redis:6379/0
       - OLLAMA_HOST=http://ollama:11434
+      - CHROMA_HOST=http://chroma:8000
     volumes:
       - .:/app
       - ./llama:/app/models
     depends_on:
-      - db
-      - redis
-      - ollama
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_started
+      chroma:
+        condition: service_started
+
+  chroma:
+    image: chromadb/chroma:0.4.24
+    container_name: askio_chroma
+    restart: always
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma
 
   db:
     image: postgres:15
@@ -32,13 +45,23 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U us -d askio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: askio_redis
     restart: always
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   ollama:
     image: ollama/ollama
@@ -48,9 +71,21 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    entrypoint: >
-      sh -c "ollama serve & sleep 5 && ollama pull llama3.1 && tail -f /dev/null"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      ollama serve &
+      sleep 10
+      ollama pull llama3.1
+      wait
+      "
 
 volumes:
+  chroma_data:
   postgres_data:
   ollama_data:

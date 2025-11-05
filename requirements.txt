@@ -14,7 +14,7 @@ redis==5.0.1
 
 # --- LLaMA + Embeddings ---
 llama-cpp-python==0.3.2
-chromadb==1.3.0
+chromadb==0.4.24
 sentence-transformers==3.0.1  # быстрый embedder
 
 # --- Utils ---
@@ -37,3 +37,4 @@ pytest-cov==7.0.0
 
 # --- Time ---
 pytz==2025.2
+numpy<2.0.0

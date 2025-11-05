@@ -4,10 +4,10 @@ FROM python:3.11-slim AS base
 # Устанавливаем системные зависимости (только нужное)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    git \
     curl \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 WORKDIR /app
 
@@ -15,8 +15,9 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Устанавливаем зависимости без кеша
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip \
+    && pip config set global.index-url https://pypi.org/simple \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Копируем исходники (код проекта)
 COPY . .

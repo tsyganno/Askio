@@ -30,6 +30,7 @@ class RAGService:
             verbose=False
         )
 
+        # # ---- ChromaDB ----
         # Ждем пока ChromaDB запустится
         max_retries = 30
         for i in range(max_retries):
@@ -46,9 +47,6 @@ class RAGService:
                 else:
                     logger.error(f"❌ Не удалось подключиться к ChromaDB: {e}")
                     raise
-
-        # # ---- ChromaDB ----
-        # self.chroma_client = chromadb.HttpClient(host="chroma", port=8000)
 
         # ---- Встроенный эмбеддер (SentenceTransformer от Chroma) ----
         self.embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -229,4 +227,3 @@ class RAGService:
 
 # Глобальный экземпляр
 rag = RAGService()
-

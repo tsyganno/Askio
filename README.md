@@ -192,7 +192,7 @@ pytest -v
 
 ## 👨‍💻 Автор
 
-**Цыганов Дмитрий Игоревич**
+**Цыганов Дмитрий**
 Python Backend Developer
 [GitHub](https://github.com/tsyganno) • [Telegram](https://t.me/dmitriy_tsyganov)
 

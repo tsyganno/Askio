@@ -50,7 +50,7 @@ app/
 
 ### 1️⃣ Загрузка документов
 
-* Пользователь отправляет `POST /api/documents` с файлами (`txt`, `md`, `pdf`).
+* Пользователь отправляет `POST /api/documents` с файлами (`pdf`).
 * Текст извлекается и разбивается на **чанки** (по 1000 символов с перекрытием 100).
 * Каждый чанк сохраняется в PostgreSQL.
 * Все чанки индексируются в **ChromaDB** для последующего семантического поиска.
@@ -103,19 +103,52 @@ cd askio
 ```env
 APP_HOST=0.0.0.0
 APP_PORT=8000
-DATABASE_URL=postgresql+asyncpg://user:password@db:5432/askio
-REDIS_URL=redis://redis:6379/0
+DATABASE_URL=postgresql+asyncpg://us:test@localhost:5432/askio
+REDIS_URL=redis://localhost:6379
 REDIS_CACHE_TTL=3600
-MODEL_PATH=app/models/llama3.1.gguf
+MODEL_PATH=llama/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+```
+### 3. 📥 Скачать модель LLaMA 3.1
+Перед запуском убедись, что у тебя есть директория llama в корне проекта и внутри неё лежит модель:
+```bash
+mkdir llama
+cd llama
+```
+Затем скачай модель LLaMA 3.1 (Q4_K_M):
+```bash
+wget https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+
+```
+💡 Если у тебя нет wget, можно скачать вручную через браузер по ссылке:
+https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+
+После скачивания структура должна выглядеть так:
+```
+askio/
+├── alembic/
+├── app/
+├── files/
+├── llama/
+│   └── Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf
+├── screenshots/
+├── tests/
+├── .env
+├── alembic.ini
+├── docker-compose.yml
+├── Dockerfile
+├── README.md
+├── requirements.txt
+└── requirements-test.txt
+
 ```
 
-### 3. Запустить через Docker Compose
+### 4. Запустить через Docker Compose
 
 ```bash
 docker compose up --build
 ```
 
-### 4. Проверить
+### 5. Проверить
 
 * API: [http://localhost:8000/api/health](http://localhost:8000/api/health)
 * Веб-интерфейс: [http://localhost:8000](http://localhost:8000)
@@ -123,7 +156,11 @@ docker compose up --build
 ---
 
 ## 🧪 Тестирование
-
+### Установка зависимостей для тестов
+Перед запуском тестов установи дополнительные библиотеки:
+```bash
+pip install -r requirements-test.txt
+```
 ### Unit-тесты (pytest)
 
 ```bash
@@ -145,37 +182,62 @@ pytest -v
 ## 🧱 Структура Docker Compose
 
 ```yaml
+version: "3.9"
+
 services:
   api:
     build: .
+    container_name: askio_api
     ports:
       - "8000:8000"
+    env_file:
+      - .env  # ← загрузить все переменные из .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://us:test@db:5432/askio  # переопределить для Docker
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - .:/app
+      - ./llama:/app/models
     depends_on:
       - db
       - redis
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://user:password@db:5432/askio
-      - REDIS_URL=redis://redis:6379/0
-      - MODEL_PATH=app/models/llama3.1.gguf
+      - ollama
 
   db:
     image: postgres:15
+    container_name: askio_db
+    restart: always
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: us
+      POSTGRES_PASSWORD: test
       POSTGRES_DB: askio
+    ports:
+      - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7
-    command: redis-server --save 60 1 --loglevel warning
+    container_name: askio_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  ollama:
+    image: ollama/ollama
+    container_name: askio_ollama
+    restart: always
+    ports:
+      - "11434:11434"
     volumes:
-      - redis_data:/data
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "ollama serve & sleep 5 && ollama pull llama3.1 && tail -f /dev/null"
 
 volumes:
-  pgdata:
-  redis_data:
+  postgres_data:
+  ollama_data:
 ```
 
 ---

@@ -102,8 +102,11 @@ class TestAPI:
 
     def test_upload_multiple_documents(self, client):
         """Тест загрузки нескольких документов"""
-        with patch('app.database.crud.save_document', new_callable=AsyncMock) as mock_save:
+        with patch('app.database.crud.save_document', new_callable=AsyncMock) as mock_save, \
+                patch('app.services.rag.rag.index_chunks', new_callable=AsyncMock) as mock_index:
+
             mock_save.return_value = 1
+            mock_index.return_value = None  # ← Заглушить index_chunks
 
             files = [
                 ('files', ('doc1.txt', io.BytesIO(b'Content 1'), 'text/plain')),
@@ -114,5 +117,4 @@ class TestAPI:
             assert response.status_code == 200
             data = response.json()
             assert len(data["results"]) == 2
-            # Проверяем, что все документы успешно обработаны
             assert all(result["status"] == "ok" for result in data["results"])

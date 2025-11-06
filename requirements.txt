@@ -38,3 +38,4 @@ pytest-cov==7.0.0
 # --- Time ---
 pytz==2025.2
 numpy<2.0.0
+httpx

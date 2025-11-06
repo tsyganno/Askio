@@ -146,6 +146,7 @@ class RAGService:
                     echo=False
                 )
                 score_text = output['choices'][0]['text'].strip()
+
                 try:
                     score = float(score_text)
                 except ValueError:

@@ -156,16 +156,36 @@ docker compose up --build
 ***
 
 ## 🧪 Тестирование
-### Установка зависимостей для тестов
-Перед запуском тестов установи дополнительные библиотеки:
-```bash
-pip install -r requirements-test.txt
-```
+
 ### Unit-тесты (pytest)
 
 ```bash
-pytest -v
+# Основная команда
+docker exec -it askio_api python -m pytest tests/ -v
 ```
+
+Тестовое покрытие Unit-тесты:
+
+* ✅ test_ask_no_relevant_documents - работа RAGService при отсутствии релевантных документов
+
+* ✅ test_ask_uses_cache - проверка кэширования в Redis
+
+* ✅ test_ask_endpoint_success - тест структуры ответа API endpoint
+
+* ✅ test_upload_documents_txt_success - загрузка TXT документов через /api/documents
+
+* ✅ test_upload_multiple_documents - загрузка нескольких документов
+
+* ✅ test_upload_documents_unsupported_format - обработка неподдерживаемых форматов
+
+Интеграционные тесты:
+
+* ✅ test_health_endpoint - проверка health check endpoint
+
+* ✅ test_ask_endpoint_structure - валидация запросов к API
+
+* ✅ test_ask_endpoint_server_error - обработка ошибок сервера
+
 
 Покрывают:
 

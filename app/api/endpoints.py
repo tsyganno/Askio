@@ -25,9 +25,7 @@ app = FastAPI(title="Askio")
 async def startup_event():
     await init_db()
     logger.info("БД подключена")
-    await rag.index_chunks()
     await cache.init_redis()
-    logger.info("redis запущен")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -47,6 +45,7 @@ async def upload_documents(files: List[UploadFile] = File(...)):
     Каждый файл автоматически разбивается на чанки и добавляется в базу.
     """
     results = []
+    new_documents_loaded = False  # ← Флаг для отслеживания новых документов
 
     for file in files:
         filename = file.filename
@@ -79,6 +78,9 @@ async def upload_documents(files: List[UploadFile] = File(...)):
             # 4. Добавляем документ и чанки в БД
             doc_id = await save_document(filename, chunks)
 
+            # Устанавливаем флаг, что появились новые документы
+            new_documents_loaded = True
+
             logger.info(f"{filename}: добавлен в базу (id={doc_id})")
 
             results.append({
@@ -97,6 +99,12 @@ async def upload_documents(files: List[UploadFile] = File(...)):
                 "status": "error",
                 "detail": str(e),
             })
+
+    # 5. Индексируем ВСЕ чанки ОДИН РАЗ после загрузки всех документов
+    if new_documents_loaded:
+        logger.info("Начинаем индексацию новых чанков в ChromaDB")
+        await rag.index_chunks()
+        logger.info("Индексация завершена")
 
     # Возвращаем суммарный результат
     return {"results": results}
